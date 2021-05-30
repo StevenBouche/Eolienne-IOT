@@ -1,168 +1,307 @@
 <html>
-
 <head>
-
     <script type='text/javascript' src='https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.js'></script>
     <link href='https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis-network.min.css' rel='stylesheet'
         type='text/css' />
-        <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
-
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.1/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-+0n0xVW2eSR5OomGNYDnhzAbDsOXxcvSN1TPprVMTNDbiYZCxYbOOl7+AMvyTG2x" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.1/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-gtEjrD/SeCtmISkJkNUaaKMoLD0//ElJ19smozuHV6z3Iehds+3Ulb9Bn9Plx0x4"
+        crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style type='text/css'>
         #mynetwork {
-            width: 1024px;
-            height: 768px;
-            border: 1px solid lightgray;
+            background: white;
+            display: inline-block;
+            height: 300px;
+            width: 100%;
         }
     </style>
 </head>
+    <body>
+        <nav class="navbar navbar-dark bg-dark">
+            <a class="navbar-brand" href="#">
+                Eolienne dashboard
+            </a>
+        </nav>
+        <div class="container" style="text-align: center;">
 
-<body>
-    <h1>PainlessMesh Network Map</h1>
+            <div class="row mt-4">
+                <div class="col-12">
+                    <div class="card text-center">
+                        <div class="card-header">
+                            Network
+                        </div>
+                        <div class="card-body">
+                            <div id='mynetwork'></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12 mt-4">
+                    <div class="card text-center">
+                        <div class="card-header">
+                            Data
+                        </div>
+                        <div class="card-body">
+                            <canvas id="line-chart" class="responsive"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </body>
+</html>
 
-    <div id='mynetwork'>
-    </div>
+<script>
 
-    <a href="https://visjs.org">
-        Made with vis.js
-        <img src='http://www.davidefabbri.net/files/visjs_logo.png' width="40" height="40" />
-    </a>
-
-
-
-    <script>
-
-        //var txt = undefined;
-
-        String.prototype.format = function () {
-            var formatted = this;
-            for (var i = 0; i < arguments.length; i++) {
-                var regexp = new RegExp('\\{' + i + '\\}', 'gi');
-                formatted = formatted.replace(regexp, arguments[i]);
-            }
-            return formatted;
-        };
-
-
-        var nodes = new vis.DataSet([]);
-        var edges = new vis.DataSet([]);
-        var aNodeId = {};
-        var idRoot = 0;
-        var n = 1;
-
-        function nodeScan(jsonData, n) {
-            //console.log('{id: ',n,',label: \'Node',n,'\'}, ');
-            //console.log('{id: ',n,',label: \'',jsonData.nodeId,'\'}, ');
-            //console.log(jsonData.nodeId,' ',n);
-            console.log('{id: {0}, text: "{1}"}'.format(n, jsonData.nodeId));
-
-            var element = {};
-            var strRoot = "";
-
-            if (!(typeof jsonData.root === 'undefined')) {
-                element["label"] = '"{0}\nRoot"'.format(jsonData.nodeId);
-                element["color"] = "lightgreen";
-            }
-            else {
-                element["label"] = '"{0}"'.format(jsonData.nodeId);
-                delete element["color"];
-            }
-            element["id"] = n;
-            nodes.add(element);
-            aNodeId[jsonData.nodeId] = n;
-            n++;
-            if (!(typeof jsonData.subs === 'undefined')) {
-                for (var i = 0; i < jsonData.subs.length; i++) {
-                    //console.log(jsonData.subs[i].nodeId,' ',n);
-                    console.log('{id: {0}, text: "{1}"}'.format(n, jsonData.subs[i].nodeId));
-
-                    if (!(typeof jsonData.subs[i].root === 'undefined')) {
-                        element["label"] = '"{0}\nRoot"'.format(jsonData.subs[i].nodeId);
-                        element["color"] = "lightgreen";
-                    }
-                    else {
-                        element["label"] = '"{0}"'.format(jsonData.subs[i].nodeId);
-                        delete element["color"];
-                    }
-                    element["id"] = n;
-                    nodes.add(element);
-                    aNodeId[jsonData.subs[i].nodeId] = n;
-                    n++;
-                    if (!(typeof jsonData.subs[i].subs === 'undefined')) { n = nodeScan(jsonData.subs[i].subs[0], n); }
-                }
-            }
-            return n;
+    String.prototype.format = function () {
+        var formatted = this;
+        for (var i = 0; i < arguments.length; i++) {
+            var regexp = new RegExp('\\{' + i + '\\}', 'gi');
+            formatted = formatted.replace(regexp, arguments[i]);
         }
+        return formatted;
+    };
 
+    //Network
+    var container = document.getElementById('mynetwork');
+    var options = {};
+    var nodes = new vis.DataSet([]);
+    var edges = new vis.DataSet([]);
+    var data = {
+        nodes: nodes,
+        edges: edges
+    };
+    var network = new vis.Network(container, data, options);
+    var aNodeId = {};
+    var aNodeIdInv = {};
+    var aNodeDataSet = {};
+    var idRoot = 0;
+    var n = 1;
 
-        function edgesScan(jsonData, prevIndex) {
-            //console.log('{id: ',n,',label: \'Node',n,'\'}, ');
-            //console.log('{id: ',n,',label: \'',jsonData.nodeId,'\'}, ');
-            from = jsonData.nodeId;
-            fromIndex = aNodeId[from];
-            var element = {};
-            if (prevIndex >= 0) {
-                console.log('#{from: {0}, to: {1}, width: 2}'.format(prevIndex, fromIndex));
-                element["id"] = n++;
-                element["from"] = prevIndex;
-                element["to"] = fromIndex;
-                element["width"] = 2;
-                edges.add(element);
-            }
-            if (!(typeof jsonData.subs === 'undefined')) {
-                for (var i = 0; i < jsonData.subs.length; i++) {
-                    //console.log(jsonData.subs[i].nodeId);
-                    to = jsonData.subs[i].nodeId;
-                    toIndex = aNodeId[to];
-                    console.log('@{from: {0}, to: {1}, width: 2} {2}'.format(fromIndex, toIndex, i));
+    //data network
+    var latestData = undefined;
+    //current data node
+    var dataNodes = {};
+    //selected node
+    var idNodeSelected = undefined;
 
-                    element["id"] = n++;
-                    element["from"] = fromIndex;
-                    element["to"] = toIndex;
-                    element["width"] = 2;
-                    edges.add(element);
-                    if (!(typeof jsonData.subs[i].subs === 'undefined')) { edgesScan(jsonData.subs[i].subs[0], toIndex); }
-                }
+    //chart
+    var labelChart = [];
+    var dataChart = [];
+    var chart = new Chart(document.getElementById("line-chart"), {
+        type: 'line',
+        data: {
+            labels: labelChart,
+            datasets: [{
+                data: dataChart,
+                label: "Speed pourcentage",
+                borderColor: "#3e95cd",
+                fill: false
+            }]
+        },
+        options: {
+            responsive: true,
+            animation: { duration: 0 },
+            scales: {
+                yAxes: [{
+                    ticks: { min: 0, max: 100 }
+                }]
             }
         }
+    });
 
-        function init() {
+    function setChart(labels, data){
+        chart.data.datasets[0].data = data;
+        chart.data.labels = labels;
+        chart.update();
+    }
 
-            var txt = '{"nodeId":681158729,"root":true,"subs":[{"nodeId":3221191353,"subs":[{"nodeId":681157921}]}]}';
+    function updateChart(){
 
-            $.get( "/network", function( data ) {
-                
-                console.log(data)
+        // reset le chart
+        if(idNodeSelected === undefined)
+            setChart([], []);
+        
+        // recupere les dernieres donnes pour le node selectionnes
+        $.get("/datas/" + idNodeSelected, function (data) {
 
-                var jsonData = data;
-                nodeScan(jsonData, 1);
-            
-                edgesScan(jsonData, -1);
+            if (data === undefined || data === null)
+                return;
 
-                // create a network
-                var container = document.getElementById('mynetwork');
-                var data = {
-                    nodes: nodes,
-                    edges: edges
-                };
-                var options = {};
-                var network = new vis.Network(container, data, options);
+            labelChart = [];
+            dataChart = [];
 
+            data.forEach(element => {
+                labelChart.push(new Date(element.data.timestamp*1000).toLocaleString());
+                dataChart.push(element.data.speedPourcent);
             });
 
+            setChart(labelChart, dataChart);
+        });
+    }
 
-            //var url = new URL(window.location.href);
-            //var txt = url.searchParams.get("subcon");
-            
+    // lors du clique sur le network
+    network.on('click', function (properties) {
 
+        //recupere le node cliquer
+        var ids = properties.nodes;
+        var clickedNodes = nodes.get(ids);
+
+        if(clickedNodes[0] != undefined && clickedNodes[0].id != undefined){
+            idNodeSelected = aNodeIdInv[clickedNodes[0].id];
+        } else  
+            idNodeSelected = undefined;
+
+        updateChart();
+        
+    });
+
+    function setNodeData(data, element){
+        if (!(typeof data.root === 'undefined')) {
+            element["label"] = '{0}\nRoot'.format(data.nodeId);
+            element["color"] = { border: 'black', background: 'blue' };
+            element["font"] = { color: 'white' }
         }
+        else {
+            element["label"] = '{0}'.format(data.nodeId);
+            delete element["color"];
+        }
+    }
 
-        window.onload = init;
+    function nodeScan(jsonData, n) {
+
+        var element = {};
+        var strRoot = "";
+
+        setNodeData(jsonData, element);
+        element["id"] = n;
+
+        // creer les liens entre le node graphique et l'id mesh
+        nodes.add(element);
+        aNodeId[jsonData.nodeId] = n;
+        aNodeIdInv[n] = jsonData.nodeId;
+        aNodeDataSet[jsonData.nodeId] = element;
+
+        n++;
+        if (!(typeof jsonData.subs === 'undefined')) {
+            
+            for (var i = 0; i < jsonData.subs.length; i++) {
+
+                element = {};
+
+                setNodeData(jsonData.subs[i], element);
+                element["id"] = n;
+
+                // creer les liens entre le node graphique et l'id mesh
+                nodes.add(element);
+                aNodeId[jsonData.subs[i].nodeId] = n;
+                aNodeIdInv[n] = jsonData.subs[i].nodeId;
+                aNodeDataSet[jsonData.subs[i].nodeId] = element;
+                n++;
+                if (!(typeof jsonData.subs[i].subs === 'undefined'))  
+                    n = nodeScan(jsonData.subs[i].subs[0], n); 
+            }
+        }
+        return n;
+    }
 
 
-    </script>
+    function edgesScan(jsonData, prevIndex) {
+        //console.log('{id: ',n,',label: \'Node',n,'\'}, ');
+        //console.log('{id: ',n,',label: \'',jsonData.nodeId,'\'}, ');
+        from = jsonData.nodeId;
+        fromIndex = aNodeId[from];
+        var element = {};
+        if (prevIndex >= 0) {
+            console.log('#{from: {0}, to: {1}, width: 2}'.format(prevIndex, fromIndex));
+            element["id"] = n++;
+            element["from"] = prevIndex;
+            element["to"] = fromIndex;
+            element["width"] = 2;
+            edges.add(element);
+        }
+        if (!(typeof jsonData.subs === 'undefined')) {
+            for (var i = 0; i < jsonData.subs.length; i++) {
+                //console.log(jsonData.subs[i].nodeId);
+                to = jsonData.subs[i].nodeId;
+                toIndex = aNodeId[to];
+                console.log('@{from: {0}, to: {1}, width: 2} {2}'.format(fromIndex, toIndex, i));
 
+                element["id"] = n++;
+                element["from"] = fromIndex;
+                element["to"] = toIndex;
+                element["width"] = 2;
+                edges.add(element);
+                if (!(typeof jsonData.subs[i].subs === 'undefined')) { edgesScan(jsonData.subs[i].subs[0], toIndex); }
+            }
+        }
+    }
 
+    // recupere les dernieres donnes pour tous les noeuds pour actualise si il est broken ou non
+    function getlastData() {
+        $.get("/datas", function (data) {
 
-</body>
+            if (data === undefined || data === null)
+                return;
 
-</html>
+            dataNodes = {};
+
+            for (var i = 0; i < data.length; i++) {
+                var element = data[i];
+
+                dataNodes[element.idMesh] = element;
+                var nodeDataSet = aNodeDataSet[element.idMesh];
+
+                if (nodeDataSet != undefined) {
+                    nodeDataSet["font"] = { color: 'white' }
+                    nodeDataSet["color"] = { border: 'black', background: element.data.isBroken ? 'red' : 'green' };
+                    nodes.update(nodeDataSet);
+                }
+            }
+        });
+    }
+
+    //recupere le json du reseau mesh et actualise le netxork graphique
+    function getNetworkMesh() {
+
+        $.get("/network", function (data) {
+
+            var newData = {
+                nodeId: data.nodeId,
+                root: data.root,
+                subs: data.subs
+            }
+
+            if (latestData != undefined && Object.entries(latestData).toString() === Object.entries(newData).toString())
+                return;
+
+            latestData = newData;
+
+            //reset les liens et clear 
+            aNodeDataSet = {};
+            aNodeId = {};
+            aNodeIdInv = {};
+            nodes.clear();
+            edges.clear();
+
+            //reconstruit le reseau
+            nodeScan(data, 1);
+            edgesScan(data, -1);
+
+            //recupere les dernieres donnes pour chaque noeud
+            getlastData();
+        });
+    }
+
+    function init() {
+        getNetworkMesh();
+        //update a certains interval
+        setInterval(getlastData, 5000); // dernieres donnes pour tous les noeuds
+        setInterval(getNetworkMesh, 5000); // le network
+        setInterval(updateChart, 5000); // les N dernieres donnes pour le noeud selectionne
+    }
+
+    window.onload = init;
+</script>
