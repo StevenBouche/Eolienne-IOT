@@ -8,9 +8,10 @@
 //************************************************************
 //#include <Arduino.h>
 #include "painlessMesh.h"
+#include "painlessmesh/protocol.hpp"
 
-#define MESH_PREFIX "whateverYouLike"
-#define MESH_PASSWORD "somethingSneaky"
+#define MESH_PREFIX "EolienneMeshNetwork"
+#define MESH_PASSWORD "FRhgekQV3zu=y?Rs"
 #define MESH_PORT 5555
 
 Scheduler userScheduler; // to control your personal task
@@ -101,27 +102,60 @@ void sendMessage(String msg)
   }
 }
 
+size_t getRootId(painlessmesh::protocol::NodeTree nodeTree) {
+  if (nodeTree.root) return nodeTree.nodeId;
+  for (auto&& s : nodeTree.subs) {
+    auto id = getRootId(s);
+    if (id != 0) return id;
+  }
+  return 0;
+}
+
+String getJsonState(){
+
+  String str;
+  StaticJsonDocument<256> doc;
+
+  long randBroken = random(11);
+  doc["idMesh"] = mesh.getNodeId();
+  doc["isBroken"] = randBroken <= 8 ? false : true;
+  doc["speedPourcent"] = randBroken <= 8 ? random(101) : 0;
+  
+  serializeJson(doc, str);
+
+  return str;
+}
+
+void taskSendStateEolienne(void * args){
+  while(true){
+    size_t rootId = getRootId(mesh.asNodeTree());
+    if(rootId != 0){
+      String str = getJsonState();
+      Serial.println(str);
+      mesh.sendSingle(rootId,str);
+    }
+    vTaskDelay(10000);
+  }
+  vTaskDelete(NULL);
+}
+
 void setup()
 {
-
   Serial.begin(115200);
 
   //mesh.setDebugMsgTypes( ERROR | MESH_STATUS | CONNECTION | SYNC | COMMUNICATION | MSG_TYPES | REMOTE ); // all types on except GENERAL
   //mesh.setDebugMsgTypes( ERROR | MESH_STATUS | CONNECTION | SYNC | COMMUNICATION | GENERAL | MSG_TYPES | REMOTE ); // all types on
-  mesh.setDebugMsgTypes(ERROR | STARTUP); // set before init() so that you can see startup messages
+  mesh.setDebugMsgTypes(ERROR | STARTUP); 
 
   mesh.init(MESH_PREFIX, MESH_PASSWORD, &userScheduler, MESH_PORT);
   mesh.onReceive(&receivedCallback);
   mesh.onNewConnection(&newConnectionCallback);
   mesh.onChangedConnections(&changedConnectionCallback);
   mesh.onNodeTimeAdjusted(&nodeTimeAdjustedCallback);
-
-  //mesh.initOTAReceive(ROLE);
-
-  //userScheduler.addTask( taskSendMessage );
-  //taskSendMessage.enable();
-
+  mesh.
   sprintf(buff, "Id:%d", mesh.getNodeId());
+
+  xTaskCreate(taskSendStateEolienne, "SendingData", 2048, NULL, 1, NULL);
 
 }
 
