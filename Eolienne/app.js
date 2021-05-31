@@ -32,24 +32,26 @@ if(!resConnection){
 }
 
 //Setup mqttClient
-ClientMQTT.addSubscription("eolienne/data", async (message) => {
+ClientMQTT.addSubscription("Eolienne/DataNode", async (message) => {
+    console.log(message);
     var json = JSON.parse(message);   
     json.unixTimestamp =  Math.floor(Date.now() / 1000);
-    await MongoDB.pushData(json, "Eolienne", "data");
+    //await MongoDB.pushData(json, "Eolienne", "data");
+    await MongoDB.getCollection("Eolienne", "data").updateOne(
+        { idMesh: json.idMesh },
+        { $push: { "data": {"isBroken": json.isBroken, "speedPourcent": json.speedPourcent, "timestamp": json.unixTimestamp} } }
+        , { upsert: true }
+    )
 });
 
-ClientMQTT.addSubscription("eolienne/network", async (message) => {
+ClientMQTT.addSubscription("Eolienne/Network", async (message) => {
+    console.log(message);
     var json = JSON.parse(message);   
     json.unixTimestamp =  Math.floor(Date.now() / 1000);
     await MongoDB.pushData(json, "Eolienne", "network");
 });
 
 ClientMQTT.connect(uriMQTT);
-
-process.on('exit', (code) => {
-    MongoDB.disconnectClient();
-    ClientMQTT.disconnect();
-})
 
 app.get('/', (req, res) => {
     res.sendFile('/website/index.html', {root: __dirname});
@@ -63,9 +65,7 @@ app.get("/stateConnection", (req, res) => {
 });
 
 app.get("/network", (req, res) => {
-
     MongoDB.getCollection("Eolienne", "network").findOne({}, {sort: {unixTimestamp: -1 } }, function(err, result) {
-        
         if (err){
             console.log(err)
             res.json({});
@@ -74,11 +74,41 @@ app.get("/network", (req, res) => {
             console.log(result)
             res.json(result);
         }
-           
-        
     });
-    
 })
+
+app.get("/datas", async (req, res) => {
+    var test = await MongoDB.getCollection("Eolienne", "data").aggregate(
+    [
+        { 
+            $project: {
+                "idMesh": "$idMesh",
+                "data": { $arrayElemAt: [{$slice: [ "$data", -1]},0] },
+            }
+        }
+    ]).toArray();
+    res.json(test);
+})
+
+app.get("/datas/:id", async (req, res) => {
+
+    var id = parseInt(req.params.id);
+
+    var test = await MongoDB.getCollection("Eolienne", "data").aggregate([
+        {$match: { 'idMesh': id }},
+        {$unwind: '$data'},
+        {$sort: { 'data.timestamp': -1 }},
+        {$limit: 30},
+        {$sort: { 'data.timestamp': 1 }}
+      ]).toArray();
+    res.json(test);
+})
+
+process.on('exit', (code) => {
+    MongoDB.disconnectClient();
+    ClientMQTT.disconnect();
+})
+
 
 export default app;
 

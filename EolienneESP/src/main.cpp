@@ -24,21 +24,29 @@
 
 //MESH
 #define HOSTNAME "MQTT_Bridge"
-#define MESH_PREFIX "whateverYouLike"
-#define MESH_PASSWORD "somethingSneaky"
+#define MESH_PREFIX "EolienneMeshNetwork"
+#define MESH_PASSWORD "FRhgekQV3zu=y?Rs"
 #define MESH_PORT 5555
 painlessMesh mesh;
 
 //Wifi
-#define STATION_SSID "Bbox-4DD70ADE"
-#define STATION_PASSWORD "551F54E2D72A27CA1EA44567F149E1"
+#define STATION_SSID "TOTA"
+#define STATION_PASSWORD "TATA"
 WiFiClient wifiClient;
 
 //MQTT
-#define PUBPLISHSUFFIX "eolienne/painlessMesh/from/"
-#define SUBSCRIBESUFFIX "eolienne/painlessMesh/to/"
-#define PUBPLISHFROMGATEWAYSUFFIX PUBPLISHSUFFIX "gateway"
+#define GATEWAY_SUFFIX "Gateway"
+#define BROADCAST_SUFFIX "Broadcast"
+#define SUBSCRIBESUFFIX "Eolienne/Mesh/To/"
+#define PUBPLISHFROMGATEWAYSUFFIX PUBPLISHSUFFIX GATEWAY_SUFFIX
+#define PUB_DATA_NODE "Eolienne/DataNode"
+#define PUB_NETWORK "Eolienne/Network"
+#define GET_NODES_GATEWAY "GetNodes"
+#define GET_NETWORK "GetNetwork"
+String PUBLISH_GATEWAY = "Eolienne/Mesh/From/" + String(GATEWAY_SUFFIX);
+
 #define CHECKCONNDELTA 60 // secondes
+
 #define MQTTPORT 1883
 char mqttBroker[] = "broker.hivemq.com";
 PubSubClient mqttClient;
@@ -61,82 +69,87 @@ char buff[512];
 uint32_t nexttime = 0;
 uint8_t initialized = 0;
 
-// messages received from the mqtt broker
+// Message recu du broker mqtt pour la gateway du reseau mesh
 void messageReceivedGateway(String msg){
 
-  if (msg == "getNodes")
-    {
-      auto nodes = mesh.getNodeList(true);
-      String str;
-      for (auto &&id : nodes)
-        str += String(id) + String(" ");
-      mqttClient.publish(PUBPLISHFROMGATEWAYSUFFIX, str.c_str());
-    }
+  //Demande d'envoi des noeuds de la gateway actuel
+  if (msg == GET_NODES_GATEWAY)
+  {
+    auto nodes = mesh.getNodeList(true);
+    String str;
+    for (auto &&id : nodes)
+      str += String(id) + String(" ");
+    mqttClient.publish(PUBLISH_GATEWAY.c_str(), str.c_str());
+  }
 
-    if (msg == "getrt")
-      mqttClient.publish(PUBPLISHFROMGATEWAYSUFFIX, mesh.subConnectionJson(false).c_str());
+  //Demande d'envoi du reseau mesh actuel
+  if (msg == GET_NETWORK)
+    mqttClient.publish(PUB_NETWORK, mesh.subConnectionJson(false).c_str());
     
-    if (msg == "asnodetree")
-    {
-      //mqttClient.publish( PUBPLISHFROMGATEWAYSUFFIX, mesh.asNodeTree().c_str() );
-    }
-
 }
 
 void mqttCallback(char *topic, uint8_t *payload, unsigned int length)
 {
-
-  //extract message MQTT and topic
+  // Extraction du topic et du message venant du broker mqtt
   char *cleanPayload = (char *)malloc(length + 1);
   payload[length] = '\0';
   memcpy(cleanPayload, payload, length + 1);
   String msg = String(cleanPayload);
   free(cleanPayload);
-
-  //affiche
   Serial.printf("mc t:%s  p:%s\n", topic, payload);
 
-  //en fonction de l'esp
+  // Recupere l'action, cad message pour la gateway, 
+  // ou a broadcast au reseau, 
+  // ou pour un noeud en particulier
   String targetStr = String(topic).substring(strlen(SUBSCRIBESUFFIX));
 
-  if (targetStr == "gateway")
-    messageReceivedGateway(msg); // envoyer a moi
-  else if (targetStr == "broadcast")
-    mesh.sendBroadcast(msg); // envoyer a tous les esps
+  // Si c'est pour la gateway
+  if (targetStr == GATEWAY_SUFFIX) messageReceivedGateway(msg); 
+  // Si le message est un broadcast
+  else if (targetStr == BROADCAST_SUFFIX) mesh.sendBroadcast(msg);
+  // Sinon essaye d'extraire l'id du noeud a envoyer
   else
   { 
-    // envoyer a un esp en particulier
+    // Extrait l'id du noeud 
     uint32_t target = strtoul(targetStr.c_str(), NULL, 10);
+    // Si il est connecter, envoi le message au noeud
     if (mesh.isConnected(target))
       mesh.sendSingle(target, msg);
   }
 }
-// Needed for painless library
 
-// message encoyer d'un des esp du réseau
+// Message recu d'un des noeuds du reseau
 void receivedCallback(const uint32_t &from, const String &msg)
 {
   Serial.printf("bridge: Received from %u msg=%s\n", from, msg.c_str());
-  String topic = PUBPLISHSUFFIX + String(from);
+  // Envoi des données du noeud vers le broker mqtt
+  String topic = PUB_DATA_NODE;
   mqttClient.publish(topic.c_str(), msg.c_str());
 }
 
+// Quand une notification lié aux connections mesh
+void onConnectionCallback(){
+  mqttClient.publish(PUB_NETWORK, mesh.subConnectionJson(false).c_str());
+}
+
+// Notification quand il y a une connection au bridge
 void newConnectionCallback(uint32_t nodeId)
 {
   Serial.printf("--> Start: New Connection, nodeId = %u\n", nodeId);
   Serial.printf("--> Start: New Connection, %s\n", mesh.subConnectionJson(true).c_str());
+  onConnectionCallback();
 }
 
-//quand une des connections esp du reseau change
+// Notification quand il y a un changement au niveau des connections
 void changedConnectionCallback()
 {
+
   Serial.printf("Changed connections\n");
 
   nodes = mesh.getNodeList();
 
   Serial.printf("Num nodes: %d\n", nodes.size());
   Serial.printf("Connection list:");
-
 
   SimpleList<uint32_t>::iterator node = nodes.begin();
   while (node != nodes.end())
@@ -149,6 +162,8 @@ void changedConnectionCallback()
   calc_delay = true;
 
   sprintf(buff, "Nodes:%d", nodes.size());
+
+  onConnectionCallback();
 }
 
 void nodeTimeAdjustedCallback(int32_t offset)
@@ -161,31 +176,32 @@ void onNodeDelayReceived(uint32_t nodeId, int32_t delay)
   Serial.printf("Delay from node:%u delay = %d\n", nodeId, delay);
 }
 
+// Tentative de connexion au broker MQTT
 void reconnectMQTT()
 {
-  int i;
-
-  // generate unique addresss.
+  // Generation d'une ID unique comme ID mqtt
   char MAC[9];
   sprintf(MAC, "%08X", (uint32_t)ESP.getEfuseMac());
 
+  // Tant que le bridge n'est pas connecter au broker mqtt
   while (!mqttClient.connected())
   {
+
     Serial.println("Attempting MQTT connection...");
 
-    if(mqttClient.connect(/*MQTT_CLIENT_NAME*/ MAC))
+    //Si le bridge est connecter 
+    if(mqttClient.connect(MAC))
     {
       Serial.println("Connected");
-      mqttClient.publish(PUBPLISHFROMGATEWAYSUFFIX, "Ready!");
+      //Subscribe au topic peut importe la terminaison
       mqttClient.subscribe(SUBSCRIBESUFFIX"#");
     }
     else
     {
-      Serial.print("Failed, rc=");
-      Serial.print(mqttClient.state());
+      Serial.print("Failed, rc=" + String(mqttClient.state()));
       Serial.println(" try again in 2 seconds");
       delay(2000);
-      //regarde si changement sur mesh ou mqtt
+      // Regarde si il y a un changement pour mesh ou mqtt
       mesh.update();
       mqttClient.loop();
     }
@@ -197,11 +213,12 @@ IPAddress getlocalIP()
   return IPAddress(mesh.getStationIP());
 }
 
-String scanprocessor(const String &var)
-{
-  if (var == "SCAN")
-    return mesh.subConnectionJson(false);
-  return String();
+void taskSendNetwork(void * args){
+  while(true){
+    mqttClient.publish(PUB_NETWORK, mesh.subConnectionJson(false).c_str());
+    vTaskDelay(30000);
+  }
+  vTaskDelete(NULL);
 }
 
 void setup()
@@ -222,6 +239,7 @@ void setup()
   mesh.onChangedConnections(&changedConnectionCallback);
   mesh.onNodeTimeAdjusted(&nodeTimeAdjustedCallback);
 
+  // Definie la porte de sortie du bridge
   mesh.stationManual(STATION_SSID, STATION_PASSWORD);
   mesh.setHostname(HOSTNAME);
 
@@ -230,15 +248,15 @@ void setup()
   // This node and all other nodes should ideally know the mesh contains a root, so call this on all nodes
   mesh.setContainsRoot(true);
 
-  //mesh.subConnectionJson(false)
-
-  //mesh.initOTAReceive("bridge");
-
   sprintf(buff, "Id:%d", mesh.getNodeId());
 
+  // Initialisation des informations concernant le broker mqtt
   mqttClient.setServer(mqttBroker, MQTTPORT);
   mqttClient.setCallback(mqttCallback);
   mqttClient.setClient(wifiClient);
+
+  xTaskCreate(taskSendNetwork, "SendingData", 2048, NULL, 1, NULL);
+
 }
 
 void loop()

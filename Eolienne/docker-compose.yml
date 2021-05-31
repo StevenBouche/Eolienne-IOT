@@ -1,0 +1,11 @@
+version: '3.4'
+
+services:
+  mongoApp:
+    container_name: mongoApp
+    image: mongo:latest
+    restart: always
+    volumes:
+      - ./mongodb/db:/data/db
+    ports:
+      - "27017:27017"
